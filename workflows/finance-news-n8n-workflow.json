@@ -1,0 +1,783 @@
+[
+  {
+    "updatedAt": "2026-08-24T12:19:51.503Z",
+    "createdAt": "2026-08-24T10:52:11.260Z",
+    "id": "Kmw1fuXCXnS3xtEK",
+    "name": "finance-news-n8n-workflow",
+    "description": null,
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {}
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          0,
+          96
+        ],
+        "id": "ca97f009-fa68-4b67-9049-472dfe9a4977",
+        "name": "Schedule Trigger"
+      },
+      {
+        "parameters": {
+          "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.rssFeedRead",
+        "typeVersion": 1.2,
+        "position": [
+          224,
+          96
+        ],
+        "id": "fa950898-1243-44ca-b4e0-0b49035ae361",
+        "name": "RSS Read"
+      },
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.limit",
+        "typeVersion": 1,
+        "position": [
+          448,
+          96
+        ],
+        "id": "e41020fb-56f9-42ad-8774-dae0ef1b7359",
+        "name": "Limit"
+      },
+      {
+        "parameters": {
+          "jsCode": "const items = $input.all();\n\nreturn items.map(({ json }) => {\n  const title = String(json.title ?? '').trim();\n  const url = String(json.link ?? json.guid ?? '').trim().split('#')[0];\n  const publishedAt = json.isoDate ?? json.pubDate ?? null;\n  const description = String(json.contentSnippet ?? json.content ?? '')\n    .replace(/<[^>]*>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  return {\n    json: {\n      article_id: url || title.toLowerCase().replace(/\\W+/g, '-'),\n      title,\n      url,\n      published_at: publishedAt,\n      source: 'BBC News Business',\n      source_tier: 'TIER_2_STABLE_MEDIA',\n      rss_description: description,\n      feed: 'BBC Business',\n      fetched_at: new Date().toISOString(),\n      dedup_key: url || title,\n    },\n  };\n});"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          672,
+          96
+        ],
+        "id": "7609e0a8-6b9f-4fb4-a190-546ea215b5e0",
+        "name": "Code in JavaScript"
+      },
+      {
+        "parameters": {
+          "jsCode": "const seen = new Set();\n\nreturn $input.all().filter(({ json }) => {\n  const key = String(json.dedup_key || json.url || json.title || '').trim();\n  if (!key || seen.has(key)) return false;\n  seen.add(key);\n  return true;\n});"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          896,
+          96
+        ],
+        "id": "2499a3a6-b724-4492-be6f-cbf37b39c696",
+        "name": "Code in JavaScript1"
+      },
+      {
+        "parameters": {
+          "url": "={{ 'https://r.jina.ai/http://' + $json.url.replace(/^https?:\\/\\//, '') }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "text"
+              }
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          1120,
+          96
+        ],
+        "id": "4ac8060b-d038-46d8-89d9-c0c5a9b2535c",
+        "name": "HTTP Request"
+      },
+      {
+        "parameters": {
+          "jsCode": "const base = $('Code in JavaScript1').first().json;\nconst rawArticle = String($json.data ?? '');\n\nreturn [{\n  json: {\n    ...base,\n    raw_article: rawArticle,\n    fetched_url: base.url,\n    fetch_method: 'jina_reader',\n    article_text_length: rawArticle.length,\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          96
+        ],
+        "id": "50c1e6d7-6ce8-4888-9583-7587c2e53118",
+        "name": "Code in JavaScript2"
+      },
+      {
+        "parameters": {
+          "modelId": {
+            "__rl": true,
+            "mode": "list",
+            "value": ""
+          },
+          "responses": {
+            "values": [
+              {}
+            ]
+          },
+          "builtInTools": {},
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 2.3,
+        "position": [
+          1568,
+          0
+        ],
+        "id": "b953d2d2-d2b3-4452-ac1b-bc907e72a6b1",
+        "name": "Message a model",
+        "credentials": {
+          "openAiApi": {
+            "id": "4v2SvqVTYuX8nOuu",
+            "name": "OpenAI account"
+          }
+        },
+        "disabled": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://chatapi.weixin.qq.com/openai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: 'GLM-5.2',\n  messages: [\n    {\n      role: 'system',\n      content: 'You are a financial-news research analyst. Analyze only the supplied article. Return valid JSON only, with no markdown fences and no extra commentary. Use exactly this schema: {\"decision\":\"KEEP|SKIP\",\"reason\":\"string\",\"event_type\":\"MACRO|COMPANY|MARKET|POLICY|GEOPOLITICS|OTHER\",\"entities\":[],\"market\":[],\"event_time\":\"string or null\",\"source\":\"string\",\"source_tier\":\"string\",\"facts\":[{\"claim\":\"string\",\"evidence\":\"string\",\"confidence\":\"HIGH|MEDIUM|LOW\"}],\"market_relevance\":\"string\",\"uncertainties\":[]}. Keep facts grounded in the article; separate facts from interpretation; do not invent numbers, causality, or investment advice.'\n    },\n    {\n      role: 'user',\n      content: 'Analyze this single article. Decide KEEP only when it is materially relevant to financial markets, companies, macroeconomics, policy, or geopolitics; otherwise SKIP.\\n\\nTitle: ' + ($json.title || '') + '\\nSource: ' + ($json.source || '') + '\\nPublished: ' + ($json.published_at || '') + '\\nURL: ' + ($json.url || '') + '\\n\\nRAW ARTICLE:\\n' + ($json.raw_article || '')\n    }\n  ],\n  temperature: 0.2\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          1632,
+          192
+        ],
+        "id": "ff214065-5a83-45c9-a290-8f98f598704c",
+        "name": "HTTP Request1",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "mbHjHizIYgNrl3TO",
+            "name": "Bearer Auth account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const base = $('Code in JavaScript2').first().json;\nconst response = $json?.data ?? $json;\nconst raw = response?.choices?.[0]?.message?.content\n  ?? response?.choices?.[0]?.text\n  ?? response?.content\n  ?? '';\n\nconst cleaned = String(raw)\n  .replace(/^\\s*\\`\\`\\`json\\s*/i, '')\n  .replace(/\\s*\\`\\`\\`\\s*$/i, '')\n  .trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n  throw new Error('Researcher JSON parse failed: ' + error.message + ' | prefix=' + cleaned.slice(0, 240));\n}\n\nconst decision = String(parsed.decision ?? '').toUpperCase();\nif (!['KEEP', 'SKIP'].includes(decision)) {\n  throw new Error('Researcher decision must be KEEP or SKIP');\n}\n\nconst facts = Array.isArray(parsed.facts)\n  ? parsed.facts.map((fact) => ({\n      claim: String(fact?.claim ?? ''),\n      evidence: String(fact?.evidence ?? ''),\n      confidence: String(fact?.confidence ?? 'LOW').toUpperCase(),\n    }))\n  : [];\n\nconst researchNotes = {\n  decision,\n  reason: String(parsed.reason ?? ''),\n  event_type: String(parsed.event_type ?? 'OTHER').toUpperCase(),\n  entities: Array.isArray(parsed.entities) ? parsed.entities.map(String) : [],\n  market: Array.isArray(parsed.market) ? parsed.market.map(String) : [],\n  event_time: parsed.event_time ?? null,\n  source: String(parsed.source ?? base.source ?? ''),\n  source_tier: String(parsed.source_tier ?? base.source_tier ?? ''),\n  facts,\n  market_relevance: String(parsed.market_relevance ?? ''),\n  uncertainties: Array.isArray(parsed.uncertainties) ? parsed.uncertainties.map(String) : [],\n};\n\nif (!researchNotes.reason || !researchNotes.event_type || !facts.length) {\n  throw new Error('Researcher output is missing required structured fields');\n}\n\nreturn [{\n  json: {\n    article_id: base.article_id,\n    title: base.title,\n    url: base.url,\n    published_at: base.published_at,\n    source: researchNotes.source,\n    source_tier: researchNotes.source_tier,\n    decision,\n    research_notes: researchNotes,\n    researcher_model: 'GLM-5.2',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1920,
+          192
+        ],
+        "id": "7c1d73b3-b44c-47b3-8786-6fd934a3af56",
+        "name": "Code in JavaScript3"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "ff033b63-1379-4985-8ff2-86456b21c0fb",
+                "leftValue": "={{ $json.decision }}",
+                "rightValue": "KEEP",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          2144,
+          192
+        ],
+        "id": "38b47840-a3dc-410f-9feb-ed8771d0774b",
+        "name": "If"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://chatapi.weixin.qq.com/openai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: 'GLM-5.2',\n  messages: [\n    {\n      role: 'system',\n      content: 'You are a careful financial-news writer. Use only the supplied structured Research Notes and metadata. Do not invent facts, numbers, causality, market predictions, or investment advice. Return valid JSON only with no markdown fences and exactly this shape: {\"headline\":\"string\",\"summary\":\"string\",\"key_facts\":[\"string\"],\"why_it_matters\":\"string\",\"possible_market_impact\":\"string\",\"watch_next\":[\"string\"],\"telegram_copy\":\"string\"}. Clearly distinguish reported facts from possible implications and include a neutral disclaimer in telegram_copy when appropriate.'\n    },\n    {\n      role: 'user',\n      content: 'Write a concise Chinese-language finance brief from the allow-listed inputs below. Do not request or use the original article text.\\n\\nTitle: ' + ($json.title || '') + '\\nSource: ' + ($json.source || '') + '\\nPublished: ' + ($json.published_at || '') + '\\nURL: ' + ($json.url || '') + '\\nResearch Notes JSON:\\n' + JSON.stringify($json.research_notes || {})\n    }\n  ],\n  temperature: 0.3\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          2368,
+          192
+        ],
+        "id": "2dc5ad08-895c-4adb-97ba-5dcea3c501e9",
+        "name": "HTTP Request2",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "mbHjHizIYgNrl3TO",
+            "name": "Bearer Auth account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const base = $('If').first().json;\nconst response = $json?.data ?? $json;\nconst raw = response?.choices?.[0]?.message?.content\n  ?? response?.choices?.[0]?.text\n  ?? response?.content\n  ?? '';\n\nconst cleaned = String(raw)\n  .replace(/^\\s*\\`\\`\\`json\\s*/i, '')\n  .replace(/\\s*\\`\\`\\`\\s*$/i, '')\n  .trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n  throw new Error('Writer JSON parse failed: ' + error.message + ' | prefix=' + cleaned.slice(0, 240));\n}\n\nconst draft = {\n  headline: String(parsed.headline ?? ''),\n  summary: String(parsed.summary ?? ''),\n  key_facts: Array.isArray(parsed.key_facts) ? parsed.key_facts.map(String) : [],\n  why_it_matters: String(parsed.why_it_matters ?? ''),\n  possible_market_impact: String(parsed.possible_market_impact ?? ''),\n  watch_next: Array.isArray(parsed.watch_next) ? parsed.watch_next.map(String) : [],\n  telegram_copy: String(parsed.telegram_copy ?? ''),\n};\n\nif (!draft.headline || !draft.summary || !draft.key_facts.length || !draft.telegram_copy) {\n  throw new Error('Writer output is missing required structured fields');\n}\n\nreturn [{\n  json: {\n    article_id: base.article_id,\n    title: base.title,\n    url: base.url,\n    published_at: base.published_at,\n    source: base.source,\n    source_tier: base.source_tier,\n    decision: base.decision,\n    research_notes: base.research_notes,\n    draft,\n    writer_model: 'GLM-5.2',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2592,
+          192
+        ],
+        "id": "81b7d45b-3cb9-4716-a6c3-084252f1fbb1",
+        "name": "Code in JavaScript4"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://chatapi.weixin.qq.com/openai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: 'GLM-5.2',\n  messages: [\n    {\n      role: 'system',\n      content: 'You are the final quality reviewer for a finance-news brief. Review only the supplied Research Notes and Draft; do not ask for or use the raw article. Check: factual accuracy, numeric consistency, time sensitivity, source support, fact-versus-opinion separation, unsupported causality, exaggerated market impact, investment-advice risk, clarity, and required format. Return valid JSON only with no markdown fences and exactly this shape: {\"status\":\"PASS|REJECT\",\"scores\":{\"facts_accuracy\":0,\"numeric_consistency\":0,\"time_sensitivity\":0,\"source_support\":0,\"fact_opinion\":0,\"causality\":0,\"market_impact\":0,\"investment_risk\":0,\"clarity\":0,\"format\":0},\"issues\":[\"string\"],\"revision_brief\":[\"short actionable instruction\"]}. Scores are integers 0-2, where 2 is acceptable. Reject only for material issues that a single bounded revision can fix. If acceptable, use PASS with an empty revision_brief.'\n    },\n    {\n      role: 'user',\n      content: 'Review this finance brief. Treat Research Notes as the factual allow-list and Draft as the proposed copy. Do not add new facts.\\n\\nResearch Notes JSON:\\n' + JSON.stringify($json.research_notes || {}) + '\\n\\nDraft JSON:\\n' + JSON.stringify($json.draft || {})\n    }\n  ],\n  temperature: 0.1\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          2816,
+          192
+        ],
+        "id": "ee150faa-095d-4126-b6c3-270ecbafc832",
+        "name": "HTTP Request3",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "mbHjHizIYgNrl3TO",
+            "name": "Bearer Auth account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const base = $('Code in JavaScript4').first().json;\nconst response = $json?.data ?? $json;\nconst raw = response?.choices?.[0]?.message?.content\n  ?? response?.choices?.[0]?.text\n  ?? response?.content\n  ?? '';\n\nconst cleaned = String(raw)\n  .replace(/^\\s*\\`\\`\\`json\\s*/i, '')\n  .replace(/\\s*\\`\\`\\`\\s*$/i, '')\n  .trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n  throw new Error('Reviewer JSON parse failed: ' + error.message + ' | prefix=' + cleaned.slice(0, 240));\n}\n\nconst status = String(parsed.status ?? '').toUpperCase();\nif (!['PASS', 'REJECT'].includes(status)) {\n  throw new Error('Reviewer status must be PASS or REJECT');\n}\n\nconst scores = parsed.scores && typeof parsed.scores === 'object' ? parsed.scores : {};\nconst issues = Array.isArray(parsed.issues) ? parsed.issues.map(String) : [];\nconst revisionBrief = Array.isArray(parsed.revision_brief)\n  ? parsed.revision_brief.map(String)\n  : [];\n\nreturn [{\n  json: {\n    article_id: base.article_id,\n    title: base.title,\n    url: base.url,\n    published_at: base.published_at,\n    source: base.source,\n    source_tier: base.source_tier,\n    decision: base.decision,\n    research_notes: base.research_notes,\n    draft: base.draft,\n    review: {\n      status,\n      scores,\n      issues,\n      revision_brief: revisionBrief,\n    },\n    reviewer_model: 'GLM-5.2',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3040,
+          192
+        ],
+        "id": "0fecaca5-4963-478a-98d3-a718aa6c47f6",
+        "name": "Code in JavaScript5"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "0782ddda-32ba-4954-aaeb-45a65c929e8c",
+                "leftValue": "={{ $json.review.status }}",
+                "rightValue": "PASS",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          3264,
+          192
+        ],
+        "id": "99abd473-c71b-4684-bac0-8d5879a1ef93",
+        "name": "If1"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\n\nif (String(item.review?.status ?? '') !== 'PASS') {\n  throw new Error('Publisher boundary only accepts Reviewer PASS');\n}\n\nreturn [{\n  json: {\n    publisher_status: 'PUBLISHER_BOUNDARY',\n    published: false,\n    destination: 'telegram_pending_credentials',\n    article_id: item.article_id,\n    title: item.title,\n    url: item.url,\n    published_at: item.published_at,\n    source: item.source,\n    headline: item.draft?.headline ?? '',\n    telegram_copy: item.draft?.telegram_copy ?? '',\n    review_status: item.review?.status ?? '',\n    note: 'Telegram credential is not configured; final copy is retained for visible execution output.',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3488,
+          96
+        ],
+        "id": "2ef1951a-e85c-42a5-816b-eedaeb445ac7",
+        "name": "Code in JavaScript6"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://chatapi.weixin.qq.com/openai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: 'GLM-5.2',\n  messages: [\n    {\n      role: 'system',\n      content: 'You are a bounded revision writer for a finance-news brief. Use only the original structured Research Notes and the concise revision brief. Do not use raw article text, the full reviewer output, or unsupported facts. Return valid JSON only with no markdown fences and exactly this shape: {\"headline\":\"string\",\"summary\":\"string\",\"key_facts\":[\"string\"],\"why_it_matters\":\"string\",\"possible_market_impact\":\"string\",\"watch_next\":[\"string\"],\"telegram_copy\":\"string\"}. Preserve factual boundaries and investment-risk disclaimer.'\n    },\n    {\n      role: 'user',\n      content: 'Revise the brief once using only these inputs.\\n\\nOriginal Research Notes JSON:\\n' + JSON.stringify($json.research_notes || {}) + '\\n\\nConcise revision_brief JSON:\\n' + JSON.stringify($json.review?.revision_brief || [])\n    }\n  ],\n  temperature: 0.2\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          3488,
+          288
+        ],
+        "id": "9d0fca8c-d6b4-4979-be00-cf853c3f8c96",
+        "name": "HTTP Request4",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "mbHjHizIYgNrl3TO",
+            "name": "Bearer Auth account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const base = $('If1').first().json;\nconst response = $json?.data ?? $json;\nconst raw = response?.choices?.[0]?.message?.content\n  ?? response?.choices?.[0]?.text\n  ?? response?.content\n  ?? '';\n\nconst cleaned = String(raw)\n  .replace(/^\\s*\\`\\`\\`json\\s*/i, '')\n  .replace(/\\s*\\`\\`\\`\\s*$/i, '')\n  .trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n  throw new Error('Revision Writer JSON parse failed: ' + error.message + ' | prefix=' + cleaned.slice(0, 240));\n}\n\nconst draft = {\n  headline: String(parsed.headline ?? ''),\n  summary: String(parsed.summary ?? ''),\n  key_facts: Array.isArray(parsed.key_facts) ? parsed.key_facts.map(String) : [],\n  why_it_matters: String(parsed.why_it_matters ?? ''),\n  possible_market_impact: String(parsed.possible_market_impact ?? ''),\n  watch_next: Array.isArray(parsed.watch_next) ? parsed.watch_next.map(String) : [],\n  telegram_copy: String(parsed.telegram_copy ?? ''),\n};\n\nif (!draft.headline || !draft.summary || !draft.key_facts.length || !draft.telegram_copy) {\n  throw new Error('Revision Writer output is missing required fields');\n}\n\nreturn [{\n  json: {\n    article_id: base.article_id,\n    title: base.title,\n    url: base.url,\n    published_at: base.published_at,\n    source: base.source,\n    source_tier: base.source_tier,\n    decision: base.decision,\n    research_notes: base.research_notes,\n    draft,\n    revision_count: 1,\n    revision_writer_model: 'GLM-5.2',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3712,
+          288
+        ],
+        "id": "276704a7-f986-4e37-b8ff-351d08b1eb81",
+        "name": "Code in JavaScript7"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://chatapi.weixin.qq.com/openai/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: 'GLM-5.2',\n  messages: [\n    {\n      role: 'system',\n      content: 'You are the final quality reviewer for a finance-news brief after one bounded revision. Review only the supplied Research Notes and revised Draft. Check factual accuracy, numeric consistency, time sensitivity, source support, fact-versus-opinion separation, unsupported causality, exaggerated market impact, investment-advice risk, clarity, and format. Return valid JSON only with no markdown fences and exactly this shape: {\"status\":\"PASS|REJECT\",\"scores\":{\"facts_accuracy\":0,\"numeric_consistency\":0,\"time_sensitivity\":0,\"source_support\":0,\"fact_opinion\":0,\"causality\":0,\"market_impact\":0,\"investment_risk\":0,\"clarity\":0,\"format\":0},\"issues\":[\"string\"],\"revision_brief\":[\"string\"]}. Scores are integers 0-2. If still materially flawed, use REJECT; a second rejection must be held and never published.'\n    },\n    {\n      role: 'user',\n      content: 'Review the revised brief once. Research Notes are the factual allow-list; do not add new facts.\\n\\nResearch Notes JSON:\\n' + JSON.stringify($json.research_notes || {}) + '\\n\\nRevised Draft JSON:\\n' + JSON.stringify($json.draft || {})\n    }\n  ],\n  temperature: 0.1\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          3936,
+          288
+        ],
+        "id": "129f0911-3e4e-4396-bef9-b2c5e2e93f65",
+        "name": "HTTP Request5",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "mbHjHizIYgNrl3TO",
+            "name": "Bearer Auth account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const base = $('Code in JavaScript7').first().json;\nconst response = $json?.data ?? $json;\nconst raw = response?.choices?.[0]?.message?.content\n  ?? response?.choices?.[0]?.text\n  ?? response?.content\n  ?? '';\n\nconst cleaned = String(raw)\n  .replace(/^\\s*\\`\\`\\`json\\s*/i, '')\n  .replace(/\\s*\\`\\`\\`\\s*$/i, '')\n  .trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n  throw new Error('Final Reviewer JSON parse failed: ' + error.message + ' | prefix=' + cleaned.slice(0, 240));\n}\n\nconst status = String(parsed.status ?? '').toUpperCase();\nif (!['PASS', 'REJECT'].includes(status)) {\n  throw new Error('Final Reviewer status must be PASS or REJECT');\n}\n\nreturn [{\n  json: {\n    article_id: base.article_id,\n    title: base.title,\n    url: base.url,\n    published_at: base.published_at,\n    source: base.source,\n    source_tier: base.source_tier,\n    decision: base.decision,\n    research_notes: base.research_notes,\n    draft: base.draft,\n    revision_count: 1,\n    final_review: {\n      status,\n      scores: parsed.scores && typeof parsed.scores === 'object' ? parsed.scores : {},\n      issues: Array.isArray(parsed.issues) ? parsed.issues.map(String) : [],\n      revision_brief: Array.isArray(parsed.revision_brief) ? parsed.revision_brief.map(String) : [],\n    },\n    final_reviewer_model: 'GLM-5.2',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4160,
+          288
+        ],
+        "id": "92590894-020d-4984-8836-85e1619ca800",
+        "name": "Code in JavaScript8"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "4a38d8ff-c533-4743-90fb-1b464c85a645",
+                "leftValue": "={{ $json.final_review.status }}",
+                "rightValue": "PASS",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "name": "filter.operator.equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          4384,
+          288
+        ],
+        "id": "c0cd05b4-69a3-4d6f-92fb-f97742d2eeaa",
+        "name": "If2"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\n\nif (String(item.final_review?.status ?? '') !== 'PASS') {\n  throw new Error('Final Publisher boundary only accepts Final Reviewer PASS');\n}\n\nreturn [{\n  json: {\n    publisher_status: 'PUBLISHER_BOUNDARY',\n    published: false,\n    destination: 'telegram_pending_credentials',\n    article_id: item.article_id,\n    title: item.title,\n    url: item.url,\n    published_at: item.published_at,\n    source: item.source,\n    headline: item.draft?.headline ?? '',\n    telegram_copy: item.draft?.telegram_copy ?? '',\n    review_status: item.final_review?.status ?? '',\n    revision_count: item.revision_count ?? 1,\n    note: 'Telegram credential is not configured; final revised copy is retained for visible execution output.',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4608,
+          192
+        ],
+        "id": "c53bbff7-26c0-4332-8079-e4776465f4aa",
+        "name": "Code in JavaScript9"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\n\nreturn [{\n  json: {\n    publisher_status: 'HOLD',\n    published: false,\n    destination: 'not_published',\n    article_id: item.article_id,\n    title: item.title,\n    url: item.url,\n    source: item.source,\n    final_review_status: item.final_review?.status ?? 'REJECT',\n    issues: item.final_review?.issues ?? [],\n    revision_count: item.revision_count ?? 1,\n    telegram_copy: item.draft?.telegram_copy ?? '',\n    note: 'Final Reviewer rejected after the single allowed revision; no publication.',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4608,
+          384
+        ],
+        "id": "69e2e861-27d6-4201-a48e-144fe14df4c0",
+        "name": "Code in JavaScript10"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\n\nreturn [{\n  json: {\n    publisher_status: 'SKIP',\n    published: false,\n    destination: 'not_published',\n    article_id: item.article_id,\n    title: item.title,\n    url: item.url,\n    source: item.source,\n    decision: 'SKIP',\n    reason: item.research_notes?.reason ?? item.reason ?? 'Researcher decided the article is not materially relevant.',\n    note: 'SKIP branch ends without Writer, Reviewer, or publication.',\n  },\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2336,
+          304
+        ],
+        "id": "ed27cdbf-ed13-44c4-8ab9-0f3abe8f71a5",
+        "name": "Code in JavaScript11"
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "RSS Read",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "RSS Read": {
+        "main": [
+          [
+            {
+              "node": "Limit",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Limit": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript1": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript2": {
+        "main": [
+          [
+            {
+              "node": "Message a model",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "HTTP Request1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request1": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript3": {
+        "main": [
+          [
+            {
+              "node": "If",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request2",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Code in JavaScript11",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request2": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript4",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript4": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request3": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript5": {
+        "main": [
+          [
+            {
+              "node": "If1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If1": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript6",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "HTTP Request4",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request4": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript7",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript7": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request5",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request5": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript8",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript8": {
+        "main": [
+          [
+            {
+              "node": "If2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If2": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript9",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Code in JavaScript10",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "binaryMode": "separate",
+      "availableInMCP": false
+    },
+    "staticData": null,
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "nodeGroups": [],
+    "pinData": {},
+    "versionId": "d370c8d9-34b6-4221-af52-2496bd4c61fc",
+    "activeVersionId": null,
+    "versionCounter": 88,
+    "triggerCount": 0,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-08-24T10:52:11.262Z",
+        "createdAt": "2026-08-24T10:52:11.262Z",
+        "role": "workflow:owner",
+        "workflowId": "Kmw1fuXCXnS3xtEK",
+        "projectId": "ICGQNYi8ETtXAlfV",
+        "project": {
+          "updatedAt": "2026-08-24T10:47:14.173Z",
+          "createdAt": "2026-08-24T10:42:30.370Z",
+          "id": "ICGQNYi8ETtXAlfV",
+          "name": "Martin K <kymnb66@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "291b3f88-17c0-42a6-b432-90e69f80a81f"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]
