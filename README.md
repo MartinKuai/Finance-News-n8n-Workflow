@@ -1,4 +1,4 @@
-# finance-news-n8n-workflow
+# Finance-News-n8n-Workflow
 
 一个面向财经内容生产的 n8n AI 自动化工作流示例，展示如何把 RSS 新闻采集、正文获取、结构化研究、内容写作、质量审核和发布边界组织成一条可复现的 low-code workflow。
 
