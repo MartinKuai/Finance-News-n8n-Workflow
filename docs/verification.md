@@ -1,54 +1,128 @@
-# finance-news-n8n-workflow V1
+# V1 实现与验证说明
 
-## 当前状态
+## 项目概览
 
-- n8n 工作流：`finance-news-n8n-workflow`
-- 工作流 ID：`Kmw1fuXCXnS3xtEK`
-- 已保存节点数：25
-- 当前保持未激活，适合先手动执行验证，避免第三方接口不稳定时被定时任务反复触发。
-- 已导出文件：`finance-news-n8n-workflow.json`
+- 工作流：`finance-news-n8n-workflow`
+- n8n 工作流 ID：`Kmw1fuXCXnS3xtEK`
+- 当前导出节点数：25
+- V1 输入策略：单次处理一篇新闻，使用 `Limit=1`
+- 主要目标：展示 low-code automation、API integration 和 AI orchestration 的完整闭环
 
-## 已落地的数据流
+## 数据流
 
-`Schedule Trigger → RSS Read → Limit(1) → Normalize → Deduplicate → Fetch Article(Jina Reader) → Article Payload → Researcher HTTP → Researcher Parse/Validate → KEEP? → Writer HTTP → Writer Parse/Validate → Reviewer HTTP → Reviewer Parse/Validate → PASS? → Publisher Boundary`
+```text
+Schedule Trigger
+→ RSS Read
+→ Limit(1)
+→ Normalize
+→ Deduplicate
+→ Fetch Article / Jina Reader
+→ Article Payload
+→ Researcher HTTP
+→ Researcher Parse / Validate
+→ KEEP?
+→ Writer HTTP
+→ Writer Parse / Validate
+→ Reviewer HTTP
+→ Reviewer Parse / Validate
+→ PASS?
+→ Publisher Boundary
+```
 
-第一轮拒绝分支已接通：
+审核分支：
 
-`Reviewer REJECT → Revision Writer → Final Reviewer → Final PASS? → Final Publisher Boundary / HOLD`
+```text
+Reviewer REJECT
+→ Revision Writer
+→ Final Reviewer
+→ Final PASS?
+→ Final Publish Boundary / HOLD
+```
 
-另外保留了 `SKIP` 分支，SKIP 不进入 Writer、Reviewer 或发布。
+Researcher 的 `SKIP` 分支直接结束，不进入 Writer、Reviewer 或发布。
 
-## 模型与凭据依赖
+## 模型与外部服务
 
-- 第三方 OpenAI-compatible 接口：`https://chatapi.weixin.qq.com/openai/v1/chat/completions`
 - 模型：`GLM-5.2`
-- HTTP 节点使用 n8n 中已存在的 Generic Bearer Auth 凭据条目。
-- 没有读取、复制或记录任何 API Key、Token 或 Authorization 值。
-- 原先的官方 OpenAI `Message a model` 节点已停用并保留为未使用节点；当前路径不再把第三方服务当作官方 OpenAI 服务。
-- Telegram 凭据尚未配置，因此 Publisher 只保留 `telegram_copy` 作为可见的 Publisher boundary，不会实际发送消息。
+- Endpoint：`https://chatapi.weixin.qq.com/openai/v1/chat/completions`
+- 接入方式：n8n HTTP Request + Generic Bearer Auth Credential
+- RSS：BBC Business RSS
+- 正文：Jina Reader
+- 发布：Publisher Boundary 保留结构化 `telegram_copy`
+
+这里的 OpenAI-compatible 表示请求格式兼容，模型服务来自第三方提供商。凭据由 n8n Credentials 管理，仓库不保存任何 API Key、Token 或 Authorization 值。
+
+## 结构化输出
+
+### Researcher
+
+```json
+{
+  "decision": "KEEP|SKIP",
+  "reason": "...",
+  "event_type": "MACRO|COMPANY|MARKET|POLICY|GEOPOLITICS|OTHER",
+  "entities": [],
+  "market": [],
+  "event_time": null,
+  "source": "...",
+  "source_tier": "...",
+  "facts": [{"claim": "...", "evidence": "...", "confidence": "HIGH|MEDIUM|LOW"}],
+  "market_relevance": "...",
+  "uncertainties": []
+}
+```
+
+### Writer
+
+```json
+{
+  "headline": "...",
+  "summary": "...",
+  "key_facts": [],
+  "why_it_matters": "...",
+  "possible_market_impact": "...",
+  "watch_next": [],
+  "telegram_copy": "..."
+}
+```
+
+### Reviewer
+
+```json
+{
+  "status": "PASS|REJECT",
+  "scores": {},
+  "issues": [],
+  "revision_brief": []
+}
+```
 
 ## 已验证路径
 
-1. 从 BBC Business RSS 拉取真实财经文章：`https://feeds.bbci.co.uk/news/business/rss.xml`。
-2. Limit 节点限制为单篇文章，完成 Normalize、URL 去重和 Jina Reader 正文获取。
-3. Researcher 真实调用成功，并解析为机器可读 JSON，包含 `KEEP/SKIP`、事件类型、实体、市场、事实证据和不确定性等字段。
-4. `KEEP` 真分支已执行。
-5. Writer 真实调用成功，只接收结构化 `research_notes`，没有接收原始正文。
-6. Reviewer 真实调用成功并返回机器可读 `PASS`、scores、issues、revision_brief。
-7. `PASS` 真分支已执行，Publisher boundary 输出了最终 `telegram_copy`，但 `published=false`。
-8. 一次完整重放曾进入首轮拒绝后的 Revision Writer 分支，但第三方接口连接在该请求处被远端关闭；另一次重放在 Researcher 请求处遇到同类连接重置。
+使用真实 BBC Business 新闻完成了以下路径验证：
 
-## 结构约束落实情况
+`RSS → Normalize → Deduplicate → Jina Reader → Researcher → KEEP → Writer → Reviewer PASS → Publisher Boundary`
 
-- 原始正文只进入 Researcher HTTP 节点。
-- Writer 只接收 Research Notes 和文章元数据。
-- Reviewer 只接收 Research Notes + Draft。
-- Revision Writer 只接收原始 Research Notes + 精简 `revision_brief`，不接收完整 Reviewer 输出。
-- 只允许一次返工；最终 Reviewer 仍为 REJECT 时进入 HOLD，不发布。
-- 未加入 RAG、向量库、数据库、行情 API、Agent、长期记忆或复杂多模型路由。
+验证重点包括：
 
-## V1 边界与后续项
+- RSS 项目字段被统一为文章元数据和去重键。
+- Jina Reader 获取正文后，原始正文只进入 Researcher。
+- Researcher 生成结构化 Research Notes。
+- Writer 只接收 Research Notes，不接收原始正文。
+- Reviewer 接收 Research Notes + Draft，并返回机器可读 PASS 结果。
+- Publisher Boundary 输出文章元数据、审核状态和最终 `telegram_copy`。
 
-- 当前是第一阶段单篇新闻 happy path，使用 Limit=1；多 RSS 源集中维护、Loop Over Items/Split in Batches、失败重试与完整 SKIP/HOLD 实测留到下一阶段。
-- 正文优先使用 Jina Reader；本次 BBC 文章正文获取成功。若后续遇到访问不稳定，可暂时退回 RSS description，但不引入复杂抓虫。
-- 由于第三方服务出现连接重置，完整自动重放尚未形成稳定的端到端 PASS 证据；当前可展示证据是逐节点真实执行到 Publisher boundary 的 PASS 路径。
+## 工程约束
+
+- 只保留 Researcher、Writer、Reviewer 三个 AI 职责节点。
+- Writer、Reviewer 和 Revision Writer 使用明确的 allow-listed 输入。
+- Revision Writer 最多执行一次。
+- Final Reviewer 仍为 REJECT 时进入 HOLD，不进入发布。
+- 未加入 RAG、向量数据库、行情 API、Agent、长期记忆或复杂多模型路由。
+
+## 下一阶段扩展
+
+- 将单一 RSS 扩展为集中维护的 3–5 个稳定财经源。
+- 接入 Loop Over Items / Split in Batches 进行多篇处理。
+- 增加更完整的 SKIP、HOLD 和发布渠道演示。
+- 在保持当前数据边界的基础上增加 Telegram、Slack 等 Publisher 适配器。
