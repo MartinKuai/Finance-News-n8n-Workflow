@@ -34,6 +34,27 @@ REJECT → Revision Writer → Final Reviewer
 
 V1 先聚焦单篇财经新闻 happy path，使用 `Limit=1` 控制输入规模，便于逐节点验证和展示完整数据流。多 RSS、循环处理和更丰富的发布渠道可以在此基础上继续扩展。
 
+## 工程约束
+
+这些约束体现了项目在可维护性、可观测性和 AI 输出治理上的工程取舍：
+
+- 只保留 Researcher、Writer、Reviewer 三个职责明确的 AI 节点。
+- Writer、Reviewer 和 Revision Writer 使用明确的 allow-listed 输入。
+- 原始正文、Research Notes、Draft 和 `revision_brief` 分层传递，避免上下文污染。
+- Revision Writer 最多执行一次，Final Reviewer 仍为 `REJECT` 时进入 `HOLD`，不进入发布。
+- LLM 输出统一经过 JSON 解析和字段校验，再进入条件分支或发布边界。
+- 不加入 RAG、向量数据库、行情 API、Agent、长期记忆或复杂多模型路由。
+
+## 下一阶段扩展
+
+在保持当前数据边界和审核策略的基础上，后续可以继续演进：
+
+- 将单一 RSS 扩展为集中维护的 3–5 个稳定财经源。
+- 接入 Loop Over Items / Split in Batches 进行多篇新闻处理。
+- 增加更完整的 SKIP、HOLD 和发布渠道演示。
+- 在 Publisher Boundary 上接入 Telegram、Slack 等消息渠道适配器。
+- 保持 Researcher → Writer → Reviewer 的职责隔离，逐步增强可观测性和运行报告。
+
 ## 核心工程设计
 
 ### 1. AI 节点职责隔离
